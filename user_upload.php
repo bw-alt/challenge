@@ -3,8 +3,11 @@
      * Assumptions / Notes:
      * - Max 120 char per line policy
      * - Create table and file can be used together
+     * - If email is invalid, Do not insert the user into the database at all
      * - Testing has not been automated as a proper framework is not set up
      */
+
+    require_once("user.php");
 
     handleInputs();
 
@@ -65,8 +68,39 @@
      * @param bool $dryRun if true, do not save to database
      */
     function processFile(string $path, bool $dryRun) {
+        $row = 0;
+        if (($handle = fopen($path, "r")) !== FALSE) {
+            $records = [];
+            while (($data = fgetcsv($handle)) !== FALSE) {
+                $row++;
+                $user = new user($data);
+                $user->format();
+                if (!$user->isEmailValid()) {
+                    if ($row > 1) { // don't report error for title line - but allow it to process if valid email
+                        echo "Invalid Email for row " . $row . ': ' . $user->getFullName()  . ".\n";
+                    }
+                    continue;
+                }
+                $records[] = $user;
+            }
+            fclose($handle);
+            if (!$dryRun) {
+                saveUsers($records);
+            } else {
+                echo "Dry run completed.\n";
+            }
+        } else {
+            echo "Error: Unable to open provided file.\n";
+        }
     }
-    
+
+    /**
+     * Saves users to the user table in the database
+     * @param array $records an array of user classes
+     */
+    function saveUsers(array $records) {
+    }
+
     /**
      * Creates a users table to insert data into
      */
