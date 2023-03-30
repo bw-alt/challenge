@@ -4,8 +4,8 @@
      * - Max 120 char per line policy
      * - Create table and file can be used together
      * - If email is invalid, Do not insert the user into the database at all
-     * - The database name is assumed to be 'Users' for now
-     * - Duplicates will be handled my MySQL primary key
+     * - You can specify a database name with -d, if not used it will default to 'Users'
+     * - Duplicates will be handled by MySQL primary key updating previous records
      * - In line mysqli has been used for simplicity. A larger program would have dedicated db conn handling.
      * - Testing has not been automated as a proper framework is not set up
      */
@@ -18,8 +18,7 @@
      * Handles the provided arguments and calls the correct function
      */
     function handleInputs() {
-        $dbName = 'Users';
-        $shortOpts ="u:p:h:";
+        $shortOpts ="u:p:h:d:";
         $longOpts = [
             "file:",
             "create_table",
@@ -41,8 +40,9 @@
                 return;
             }
             try {
-                $conn = new mysqli($options["h"], $options["u"], $options["p"] ?? '', $dbName);
-            } catch (Exception $e) {
+                mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+                $conn = new mysqli($options["h"], $options["u"], $options["p"] ?? '', $options["d"] ?? "Users");
+            } catch (mysqli_sql_exception $e) {
                 echo "Error: Could not connect to database. Please check your directives.\n";
                 return;
             }
@@ -58,7 +58,7 @@
         }
 
         // Process file
-        if(array_key_exists("file", $options)) {
+        if (array_key_exists("file", $options)) {
             $file = $options["file"];
             if (isset($file) && $file != false) {
                 processFile($file, $conn ?? null); // conn will never exist in dry run
@@ -87,7 +87,7 @@
                 $user->format();
                 if (!$user->isEmailValid()) {
                     if ($row > 1) { // don't report error for title line - but allow it to process if valid email
-                        echo "Invalid Email for row " . $row . ': ' . $user->getFullName()  . ".\n";
+                        echo "Invalid Email for row " . $row . ": " . $user->getFullName()  . ".\n";
                     }
                     continue;
                 }
@@ -110,15 +110,17 @@
      * @param array $records an array of user classes
      */
     function saveUsers(?mysqli $conn, array $records) {
-        if(!$conn->query("DESCRIBE `users`")) { // table doesn't exist
+        if (!$conn->query("DESCRIBE `users`")) { // table doesn't exist
             echo "Error: Table 'users' does not exist. Please create it using --create table.\n";
             return;
         }
 
-        $query = "INSERT INTO Users (name, surname, email) VALUES (?, ?, ?)";
+        $query = "INSERT INTO Users (name, surname, email) 
+            VALUES (?, ?, ?) 
+            ON DUPLICATE KEY UPDATE name=?, surname=?";
         try {
             $stmt = $conn->prepare($query);
-            $stmt->bind_param("sss", $name, $surname, $email); // will be available when executed
+            $stmt->bind_param("sssss", $name, $surname, $email, $name, $surname); // available when executed
 
             $conn->query("START TRANSACTION"); // more efficient as they will be processed together
             foreach ($records as $user) {
@@ -130,8 +132,8 @@
             $stmt->close();
             $conn->query("COMMIT");
             echo "Users added to the database.\n";
-        } catch (Exception $e) {
-            echo "Error: Unable to save users to the database.\n";
+        } catch (mysqli_sql_exception $e) {
+            echo "Error: Unable to save users to the database: " . $e->getMessage() . ".\n";
         }
     }
 
@@ -149,8 +151,8 @@
             $stmt = $conn->prepare($query);
             $stmt->execute();
             echo "Table created.\n";
-        } catch (Exception $e) {
-            echo "Error: Unable to create Users Table.\n";
+        } catch (mysqli_sql_exception $e) {
+            echo "Error: Unable to create users Table: " . $e->getMessage() . ".\n";
         }
     }
 
@@ -166,6 +168,7 @@
         -u – MySQL username
         -p – MySQL password
         -h – MySQL host
+        -d – MySQL database name
         --help – will output the list of directives with details.
         END;
     }
